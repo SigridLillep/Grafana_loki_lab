@@ -1,0 +1,120 @@
+version: "3.8"
+
+services:
+  # === RAKENDUSED ===
+  # Need 3 konteinerit genereerivad andmeid, mida monitoorime
+
+  shoehub:
+    image: aussiearef/shoehub:latest
+    container_name: shoehub
+    ports:
+      - "8080:8080"             # Metrics endpoint: http://localhost:8080/metrics
+    labels:
+      logging: "promtail"       # Promtail kogub selle konteineri logid
+    networks:
+      - monitoring
+
+  hotrod:
+    image: jaegertracing/example-hotrod:latest
+    container_name: hotrod
+    command: ["all", "--otel-exporter=otlp"]
+    environment:
+      # HotROD saadab trace'id Temposse OTLP protokolliga
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+    ports:
+      - "8081:8080"             # NB! Host port 8081, sest 8080 on ShoeHub
+    labels:
+      logging: "promtail"
+    networks:
+      - monitoring
+
+  log-generator:
+    image: mingrammer/flog:0.4.3
+    container_name: log-generator
+    command: -f json -t log -d 1s -l  # JSON formaat, 1 rida sekundis, lõputult
+    labels:
+      logging: "promtail"
+    networks:
+      - monitoring
+
+  # === METRICS ===
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"             # Prometheus UI: http://localhost:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml  # Scrape konfig
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    networks:
+      - monitoring
+
+  # === LOGS ===
+  loki:
+    image: grafana/loki:2.9.3
+    container_name: loki
+    ports:
+      - "3100:3100"             # Loki API: http://localhost:3100/ready
+    command: -config.file=/etc/loki/local-config.yaml  # Sisseehitatud vaikekonfig
+    volumes:
+      - loki-data:/loki         # Logide püsihoidla
+    networks:
+      - monitoring
+
+  promtail:
+    image: grafana/promtail:2.9.3
+    container_name: promtail
+    volumes:
+      - /var/log:/var/log:ro                             # Hosti logid (ainult Linux!)
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro  # Docker logifailid (ainult Linux!)
+      - /var/run/docker.sock:/var/run/docker.sock        # Docker API konteinerite avastamiseks
+      - ./promtail-config.yml:/etc/promtail/config.yml   # Meie konfig
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki                    # Oodake Lokit enne käivitamist
+    networks:
+      - monitoring
+
+  # === TRACES (ainult demo) ===
+  tempo:
+    image: grafana/tempo:2.3.1
+    container_name: tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo-config.yaml:/etc/tempo.yaml
+      - tempo-data:/tmp/tempo   # Trace'ide püsihoidla
+    ports:
+      - "3200:3200"             # Tempo API
+      - "4317:4317"             # OTLP gRPC (HotROD saadab siia)
+      - "4318:4318"             # OTLP HTTP
+    networks:
+      - monitoring
+
+  # === VISUALISEERIMINE ===
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: grafana
+    ports:
+      - "3000:3000"             # Grafana UI: http://localhost:3000
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin   # Login: admin / admin
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./provisioning:/etc/grafana/provisioning  # Data source'id automaatselt
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+    networks:
+      - monitoring
+
+volumes:
+  grafana-data:     # Grafana dashboardid ja seaded
+  loki-data:        # Loki logide andmed
+  tempo-data:       # Tempo trace andmed
+
+networks:
+  monitoring:       # Kõik konteinerid ühes võrgus, näevad teineteist nime järgi
