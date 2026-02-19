@@ -1,0 +1,19 @@
+server:
+  http_listen_port: 3200          # Tempo API ja UI
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: 0.0.0.0:4318  # HotROD saadab trace'id siia (OTLP HTTP)
+        grpc:
+          endpoint: 0.0.0.0:4317  # Alternatiiv: OTLP gRPC
+
+storage:
+  trace:
+    backend: local                # Lokaalne failisüsteem (labori jaoks piisav)
+    wal:
+      path: /tmp/tempo/wal        # Write-ahead log
+    local:
+      path: /tmp/tempo/blocks     # Trace andmete hoidla

@@ -1,0 +1,23 @@
+server:
+  http_listen_port: 9080          # Promtail enda metrics endpoint
+
+positions:
+  filename: /tmp/positions.yaml   # Mäletab, kust logifailis pooleli jäi
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push  # Kuhu logid saata
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock  # Avastab konteinereid Docker API kaudu
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ["logging=promtail"]   # Ainult konteinerid, kus label logging=promtail
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'          # Konteineri nimi → Loki label {container="..."}
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'             # stdout/stderr → Loki label {stream="..."}
